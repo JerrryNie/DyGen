@@ -1,0 +1,14 @@
+CUDA_VISIBLE_DEVICES=0  python ../main.py \
+    --lr 5e-6 \
+    --dataset semeval \
+    --saved_dataset n \
+    --noise_ratio 0.16 \
+    --train_batch_size 32 \
+    --epochs 2 \
+    --vae_lr 1e-4 \
+    --vae_epochs 500 \
+    --total_iter 10 \
+    --lambda_t 1 \
+    --noise_type SN \
+    --seed 1 \
+    --path /home/yihui/VscodeFiles/DyGen/datasets/semeval

@@ -10,7 +10,7 @@ from sklearn.datasets import fetch_20newsgroups
 from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
 from keras.preprocessing.sequence import pad_sequences
 from transformers  import BertTokenizer
-
+from collections import Counter
 def set_seed(args):
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -55,12 +55,12 @@ def load_dataset(args, dataset):
     if dataset == '20news':
         
         VALIDATION_SPLIT = 0.8
-        newsgroups_train  = fetch_20newsgroups(data_home='/localscratch/yzhuang43/datasets/20news', subset='train',  shuffle=True, random_state=args.seed)
+        # newsgroups_train  = fetch_20newsgroups(data_home='/localscratch/yzhuang43/datasets/20news', subset='train',  shuffle=True, random_state=args.seed)
         newsgroups_train  = fetch_20newsgroups(data_home=args.path, subset='train',  shuffle=True, random_state=args.seed)
-        print(newsgroups_train.target_names)
-        print(len(newsgroups_train.data))
+        # print(newsgroups_train.target_names)
+        # print(len(newsgroups_train.data))
 
-        newsgroups_test  = fetch_20newsgroups(data_home='/localscratch/yzhuang43/datasets/20news', subset='test',  shuffle=False)
+        newsgroups_test  = fetch_20newsgroups(data_home=args.path, subset='test',  shuffle=False)
 
         print(len(newsgroups_test.data))
 
@@ -146,32 +146,65 @@ def load_dataset(args, dataset):
         print(len(val_labels))
         print(len(test_labels))
         return train_sentences, val_sentences, test_sentences, train_labels, val_labels, test_labels
-    elif dataset == 'trec' or dataset == 'chemprot' or dataset == 'semeval':
+    elif dataset == 'trec' or dataset == 'chemprot' or dataset == 'semeval' or dataset == 'youtube' or dataset == 'sms':
         noisy_train_labels, train_sentences, train_labels = [], [], []
         noisy_val_labels, val_sentences, val_labels = [], [], []
         noisy_test_labels, test_sentences, test_labels = [], [], []
-        with open(args.folder_path+'/train.json', encoding='utf-8') as f:
-            for line in f.readlines():
-                d = json.loads(line)
-                noisy_train_labels.append(d['weak_label'])
-                train_sentences.append(d['text'])
-                train_labels.append(d['label'])
+        with open(args.path+'/train.json', encoding='utf-8') as f:
+            data = json.load(f)
+            for key, value in data.items():             
+                train_sentences.append(value['data']['text'])
+                train_labels.append(value['label'])
+                filtered_labels = [label for label in value['weak_labels'] if label != -1]
+                common_labels = Counter(filtered_labels).most_common()
+                if not filtered_labels:
+                    noisy_train_labels.append(random.randint(0, args.num_classes - 1))
+                else:
+                    max_count = common_labels[0][1]
+                    top_labels = [label for label, count in common_labels if count == max_count]
+                    if value['label'] in top_labels:
+                        noisy_train_labels.append(value['label'])
+                    else:
+                        noisy_train_labels.append(random.choice(top_labels))
             f.close()
-        with open(args.folder_path+'/valid.json', encoding='utf-8') as f:
-            for line in f.readlines():
-                d = json.loads(line)
-                noisy_val_labels.append(d['weak_label'])
-                val_sentences.append(d['text'])
-                val_labels.append(d['label'])
+        with open(args.path+'/valid.json', encoding='utf-8') as f:
+            data = json.load(f)
+            for key, value in data.items():             
+                val_sentences.append(value['data']['text'])
+                val_labels.append(value['label'])
+                filtered_labels = [label for label in value['weak_labels'] if label != -1]
+                common_labels = Counter(filtered_labels).most_common()
+                if not filtered_labels:
+                    noisy_val_labels.append(random.randint(0, args.num_classes - 1))
+                else:
+                    max_count = common_labels[0][1]
+                    top_labels = [label for label, count in common_labels if count == max_count]
+                    if value['label'] in top_labels:
+                        noisy_val_labels.append(value['label'])
+                    else:
+                        noisy_val_labels.append(random.choice(top_labels))
             f.close()
-        with open(args.folder_path+'/test.json', encoding='utf-8') as f:
-            for line in f.readlines():
-                d = json.loads(line)
-                noisy_test_labels.append(d['weak_label'])
-                test_sentences.append(d['text'])
-                test_labels.append(d['label'])
+        with open(args.path+'/test.json', encoding='utf-8') as f:
+            data = json.load(f)
+            for key, value in data.items():             
+                test_sentences.append(value['data']['text'])
+                test_labels.append(value['label'])
+                filtered_labels = [label for label in value['weak_labels'] if label != -1]
+                common_labels = Counter(filtered_labels).most_common()
+                if not filtered_labels:
+                    noisy_test_labels.append(random.randint(0, args.num_classes - 1))
+                else:
+                    max_count = common_labels[0][1]
+                    top_labels = [label for label, count in common_labels if count == max_count]
+                    if value['label'] in top_labels:
+                        noisy_test_labels.append(value['label'])
+                    else:
+                        noisy_test_labels.append(random.choice(top_labels))
             f.close()
-        return train_sentences, val_sentences, test_sentences, train_labels, val_labels, test_labels, noisy_train_labels, noisy_val_labels, noisy_test_labels
+        if dataset == 'trec' or dataset == 'chemprot' or dataset == 'semeval':
+            return train_sentences, val_sentences, test_sentences, train_labels, val_labels, test_labels, noisy_train_labels, noisy_val_labels, noisy_test_labels
+        else:   
+            return train_sentences, val_sentences, test_sentences, train_labels, val_labels, test_labels
     
     
 
@@ -273,7 +306,6 @@ def read_data(args, num_labels):
 def read_noisy_data(args, num_labels):
     # load dataset
     train_sentences, val_sentences, test_sentences, train_labels, val_labels, test_labels, noisy_train_labels, noisy_val_labels, noisy_test_labels = load_dataset(args, args.dataset)
-
     tokenizer = BertTokenizer.from_pretrained(args.bert, do_lower_case=True)
 
     train_input_ids = []
@@ -358,7 +390,7 @@ def read_noisy_data(args, num_labels):
 
 
 def create_dataset(args):
-    if args.dataset == '20news' or args.dataset == 'agnews' or args.dataset == 'wos':
+    if args.dataset == '20news' or args.dataset == 'agnews' or args.dataset == 'wos' or args.dataset == 'youtube' or args.dataset == 'sms':
         if args.dataset == '20news':
             num_labels = 20
             args.num_classes = 20
@@ -368,6 +400,12 @@ def create_dataset(args):
         elif args.dataset == 'wos':
             num_labels = 134
             args.num_classes = 134
+        elif args.dataset == 'sms':
+            num_labels = 2
+            args.num_classes = 2
+        elif args.dataset == 'youtube':
+            num_labels = 2
+            args.num_classes = 2
         if args.saved_dataset == 'n':
             train_inputs, train_masks, train_labels, noisy_train_labels, validation_inputs, validation_masks, validation_labels, noisy_validation_labels, test_inputs, test_masks, test_labels = read_data(args, num_labels)
             train_data = TensorDataset(train_inputs, train_masks, train_labels, noisy_train_labels)
@@ -409,8 +447,13 @@ def create_dataset(args):
         elif args.dataset == 'semeval':
             num_labels = 9
             args.num_classes = 9
+
         if args.saved_dataset == 'n':
             train_inputs, train_masks, train_labels, noisy_train_labels, validation_inputs, validation_masks, validation_labels, noisy_validation_labels, test_inputs, test_masks, test_labels = read_noisy_data(args, num_labels)
+            # print(train_inputs.shape)
+            # print(train_masks.shape)
+            # print(train_labels.shape)
+            # print(noisy_train_labels.shape)
             train_data = TensorDataset(train_inputs, train_masks, train_labels, noisy_train_labels)
             train_sampler = SequentialSampler(train_data)
             train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=args.train_batch_size)

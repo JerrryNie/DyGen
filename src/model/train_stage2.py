@@ -95,7 +95,11 @@ class stage2_gen:
                 y_recon_list = torch.stack(y_recon_list, dim=0)
                 alpha_infer_list = torch.stack(alpha_infer_list, dim=0)
                 recon_loss, kl_loss, reg_loss = self.loss_function(label_one_hot, y_recon_list, alpha_prior, alpha_infer_list)
-                loss = recon_loss + self.args.beta * kl_loss + self.lambda_t * reg_loss
+                # Co-Regularization Mechanism
+                if self.args.ablation == 2 or self.args.ablation == 3:
+                    loss = recon_loss + self.args.beta * kl_loss
+                else:
+                    loss = recon_loss + self.args.beta * kl_loss + self.lambda_t * reg_loss
             self.grad_scaler.scale(loss).backward()
             self.grad_scaler.step(self.optimizer)
             self.grad_scaler.update()

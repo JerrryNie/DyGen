@@ -18,11 +18,11 @@ class NLLModel(nn.Module):
         num_labels = args.num_classes
         self.args = args
         self.models = nn.ModuleList()
-        self.device = [i % args.n_gpu for i in range(args.n_model)]
+        # self.device = [i % args.n_gpu for i in range(args.n_model)]
         self.loss_fnt = nn.CrossEntropyLoss()
         for i in range(args.n_model):
-            model = BertForSequenceClassification.from_pretrained(args.bert, num_labels=num_labels, output_hidden_states=True)
-            model.to(self.device[i])
+            model = BertForSequenceClassification.from_pretrained(args.bert, num_labels=num_labels, output_hidden_states=True, ignore_mismatched_sizes=True)
+            # model.to(self.device[i])
             self.models.append(model)
 
     def forward(self, input_ids, attention_mask, labels=None):
@@ -30,9 +30,9 @@ class NLLModel(nn.Module):
         outputs = []
         for i in range(num_models):
             output = self.models[i](
-                input_ids=input_ids.to(self.device[i]),
-                attention_mask=attention_mask.to(self.device[i]),
-                labels=labels.to(self.device[i]) if labels is not None else None,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                labels=labels if labels is not None else None,
                 return_dict=False,
             )
             outputs.append(output)
@@ -44,7 +44,11 @@ class NLLModel(nn.Module):
             probs = [F.softmax(logit, dim=-1) for logit in logits]
             avg_prob = torch.stack(probs, dim=0).mean(0)
             reg_loss = sum([kl_div(avg_prob, prob) for prob in probs]) / num_models
-            loss = loss + self.args.alpha_t * reg_loss.mean()
+            ## Co-Regularization Mechanism
+            if self.args.ablation == 1 or self.args.ablation == 3:
+                return loss
+            else:
+                loss = loss + self.args.alpha_t * reg_loss.mean()
             return loss
         return model_output
 
@@ -59,7 +63,6 @@ def train_stage1(args, train_dataloader, validation_dataloader, prediction_datal
         print("Let's use", torch.cuda.device_count(), "GPUs!")
         model = nn.DataParallel(model)
     model.to(args.device)
-
     t_total = len(train_dataloader) * args.epochs
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, eps=1e-9)
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=int(0.06*t_total), num_training_steps=t_total)
@@ -69,10 +72,14 @@ def train_stage1(args, train_dataloader, validation_dataloader, prediction_datal
     best_val = -np.inf
     # trange is a tqdm wrapper around the normal python range
     dists_epochs = []
-    train_embeds_list = [None] * len(model.models)
-    eval_embeds_list = [None] * len(model.models)
-    test_embeds_list = [None] * len(model.models)
-    dists_list = [None] * len(model.models)
+    if torch.cuda.device_count() > 1:
+       model_num = len(model.module.models) 
+    else:
+        model_num = len(model.models) 
+    train_embeds_list = [None] * model_num
+    eval_embeds_list = [None] * model_num
+    test_embeds_list = [None] * model_num
+    dists_list = [None] * model_num
     num_epochs = 0
     for epoch in trange(args.epochs, desc="Epoch"): 
       # Training
@@ -87,7 +94,6 @@ def train_stage1(args, train_dataloader, validation_dataloader, prediction_datal
             batch = tuple(t.to(args.device) for t in batch)
             # Unpack the inputs from our dataloader
             b_input_ids, b_input_mask, _, b_labels = batch
-
             if num_epochs < int(args.epochs/10):
                 args.alpha_t = 0
             else:
@@ -112,9 +118,9 @@ def train_stage1(args, train_dataloader, validation_dataloader, prediction_datal
         # Validation
         # Put model in evaluation mode to evaluate loss on the validation set
         model.eval()
-        train_embeds = [None] * len(model.models)
-        train_labels = [None] * len(model.models)
-        train_logits = [None] * len(model.models)
+        train_embeds = [None] * model_num
+        train_labels = [None] * model_num
+        train_logits = [None] * model_num
         for batch in train_dataloader:
             batch = tuple(t.to(args.device) for t in batch)
             b_input_ids, b_input_mask, _, b_labels = batch
@@ -143,9 +149,9 @@ def train_stage1(args, train_dataloader, validation_dataloader, prediction_datal
         labels_list = []
 
         model.eval()
-        eval_embeds = [None] * len(model.models)
-        eval_labels = [None] * len(model.models)
-        eval_logits = [None] * len(model.models)
+        eval_embeds = [None] * model_num
+        eval_labels = [None] * model_num
+        eval_logits = [None] * model_num
         # Evaluate data for one epoch
         for batch in validation_dataloader:
             # Add batch to GPU
@@ -177,7 +183,7 @@ def train_stage1(args, train_dataloader, validation_dataloader, prediction_datal
     
             eval_accurate_nb += tmp_eval_nb
             nb_eval_examples += label_ids.shape[0]
-        for idx in range(len(model.models)):
+        for idx in range(model_num):
             if eval_embeds_list[idx] == None:
                 eval_embeds_list[idx] = torch.zeros((args.epochs, eval_embeds[idx].shape[0], eval_embeds[idx].shape[1]))
                 eval_embeds_list[idx][0] = eval_embeds[idx].detach()
@@ -198,8 +204,8 @@ def train_stage1(args, train_dataloader, validation_dataloader, prediction_datal
         nb_test_examples = 0
         logits_list = []
         labels_list = []
-        test_embeds = [None] * len(model.models)
-        test_labels = [None] * len(model.models)
+        test_embeds = [None] * model_num
+        test_labels = [None] * model_num
         # Predict 
         for batch in prediction_dataloader:
             # Add batch to GPU
@@ -237,10 +243,10 @@ def train_stage1(args, train_dataloader, validation_dataloader, prediction_datal
                 test_embeds_list[idx][epoch] = test_embeds[idx].detach()
 
         print("Test Accuracy: {}".format(eval_accurate_nb/nb_test_examples))
-        
+         
         if args.dataset != 'wos' and args.dataset != 'tacred':
-            full_dists = [None] * len(model.models)
-            for idx in range(len(model.models)):
+            full_dists = [None] * model_num
+            for idx in range(model_num):
                 dists_embeds = torch.cat((train_embeds[idx], eval_embeds[idx], test_embeds[idx]), 0)
                 dists_labels = torch.cat((train_labels[idx], eval_labels[idx], test_labels[idx]), 0)
                 dists = euclidean_dist(args, dists_embeds, dists_labels)
@@ -254,8 +260,8 @@ def train_stage1(args, train_dataloader, validation_dataloader, prediction_datal
                 else:
                     dists_list[idx][epoch] = full_dists[idx].detach()
         else:
-            full_dists = [None] * len(model.models)
-            for idx in range(len(model.models)):
+            full_dists = [None] * model_num
+            for idx in range(model_num):
                 dists_embeds = torch.cat((train_embeds[idx], eval_embeds[idx], test_embeds[idx]), 0)
                 dists_labels = torch.cat((train_labels[idx], eval_labels[idx], test_labels[idx]), 0)
                 dists = euclidean_dist_wos(args, dists_embeds, dists_labels)
