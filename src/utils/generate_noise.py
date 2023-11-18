@@ -10,6 +10,8 @@ from sklearn.datasets import fetch_20newsgroups
 from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
 from keras.preprocessing.sequence import pad_sequences
 from transformers  import BertTokenizer
+import datasets
+from collections import Counter
 
 def set_seed(args):
     random.seed(args.seed)
@@ -151,26 +153,61 @@ def load_dataset(args, dataset):
         noisy_val_labels, val_sentences, val_labels = [], [], []
         noisy_test_labels, test_sentences, test_labels = [], [], []
         with open(args.folder_path+'/train.json', encoding='utf-8') as f:
-            for line in f.readlines():
-                d = json.loads(line)
-                noisy_train_labels.append(d['weak_label'])
-                train_sentences.append(d['text'])
-                train_labels.append(d['label'])
+            data = json.load(f)
+            # for key, value in data.items():
+            #     noisy_train_labels.append(value['weak_labels'])
+            #     train_sentences.append(value['data']['text'])
+            #     train_labels.append(value['label'])
+            for key, value in data.items():             
+                train_sentences.append(value['data']['text'])
+                train_labels.append(value['label'])
+                filtered_labels = [label for label in value['weak_labels'] if label != -1]
+                common_labels = Counter(filtered_labels).most_common()
+                if not filtered_labels:
+                    noisy_train_labels.append(random.randint(0, args.num_classes - 1))
+                else:
+                    max_count = common_labels[0][1]
+                    top_labels = [label for label, count in common_labels if count == max_count]
+                    if value['label'] in top_labels:
+                        noisy_train_labels.append(value['label'])
+                    else:
+                        noisy_train_labels.append(random.choice(top_labels))
             f.close()
         with open(args.folder_path+'/valid.json', encoding='utf-8') as f:
-            for line in f.readlines():
-                d = json.loads(line)
-                noisy_val_labels.append(d['weak_label'])
-                val_sentences.append(d['text'])
-                val_labels.append(d['label'])
+            data = json.load(f)
+            for key, value in data.items():
+                val_sentences.append(value['data']['text'])
+                val_labels.append(value['label'])
+                filtered_labels = [label for label in value['weak_labels'] if label != -1]
+                common_labels = Counter(filtered_labels).most_common()
+                if not filtered_labels:
+                    noisy_val_labels.append(random.randint(0, args.num_classes - 1))
+                else:
+                    max_count = common_labels[0][1]
+                    top_labels = [label for label, count in common_labels if count == max_count]
+                    if value['label'] in top_labels:
+                        noisy_val_labels.append(value['label'])
+                    else:
+                        noisy_val_labels.append(random.choice(top_labels))
             f.close()
         with open(args.folder_path+'/test.json', encoding='utf-8') as f:
-            for line in f.readlines():
-                d = json.loads(line)
-                noisy_test_labels.append(d['weak_label'])
-                test_sentences.append(d['text'])
-                test_labels.append(d['label'])
+            data = json.load(f)
+            for key, value in data.items():
+                test_sentences.append(value['data']['text'])
+                test_labels.append(value['label'])
+                filtered_labels = [label for label in value['weak_labels'] if label != -1]
+                common_labels = Counter(filtered_labels).most_common()
+                if not filtered_labels:
+                    noisy_test_labels.append(random.randint(0, args.num_classes - 1))
+                else:
+                    max_count = common_labels[0][1]
+                    top_labels = [label for label, count in common_labels if count == max_count]
+                    if value['label'] in top_labels:
+                        noisy_test_labels.append(value['label'])
+                    else:
+                        noisy_test_labels.append(random.choice(top_labels))
             f.close()
+        
         return train_sentences, val_sentences, test_sentences, train_labels, val_labels, test_labels, noisy_train_labels, noisy_val_labels, noisy_test_labels
     
     
