@@ -1,5 +1,5 @@
 import argparse
-import os
+
 import numpy as np
 import torch
 from torch import nn
@@ -18,6 +18,8 @@ from src.model.train_stage1 import *
 from src.model.train_stage2 import *
 from src.model.evaluate import *
 from src.utils.generate_noise import *
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 def main():
     parser = argparse.ArgumentParser()
@@ -29,9 +31,10 @@ def main():
     parser.add_argument("--epochs", default=10, type=int, help="Number of epochs for training.")
     parser.add_argument("--vae_epochs", default=20, type=int, help="Number of epochs for training.")
     parser.add_argument("--seed", default=0, type=int, help="Number of epochs for training.")
-    parser.add_argument("--dataset", default='20news', type=str, help="dataset")
+    parser.add_argument("--dataset", default='trec', type=str, help="dataset")
     parser.add_argument("--weight_decay", default=0.0, type=float, help="Weight decay if we apply some.")
     parser.add_argument('--saved_dataset', type=str, default='n', help='whether save the preprocessed pt file of the dataset')
+    parser.add_argument("--folder_path", type=str, default='./datasets/trec', help='The path of the dataset.')
     parser.add_argument("--noise_ratio", type=float, default=0.0, help='The ratio of noisy data to be poisoned.')
     parser.add_argument("--noise_type", type=str, default="s")
     parser.add_argument("--n_model", type=int, default=2, help='The number of detection-relabeling iterations.')
@@ -51,7 +54,7 @@ def main():
     parser.add_argument('--lambda_t', type=float, default=5)
     parser.add_argument('--alpha_t_hi', type=float, default=5)
     parser.add_argument('--warmup_epochs', type=float, default=0.1)
-    parser.add_argument("--path", type=str, default='./datasets/20news')
+    parser.add_argument("--path", type=str, default='./datasets/trec')
     parser.add_argument("--bert", type=str, default="bert-base-uncased")
     
     args = parser.parse_args()
@@ -59,7 +62,7 @@ def main():
     print(args)
     
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     args.device = device
     set_seed(args)
 
@@ -117,7 +120,7 @@ def main():
         markers[noisy_points] = 1
         dists_score_list.append(dists_score.unsqueeze(0))
         markers_list.append(markers.unsqueeze(0))
-    dists_score_list = torch.stack(dists_score_list, dim=0)
+    dists_score_list = torch.stack(dists_score_list, dim=0) # corresponding to the si in 5.1.2
     markers_list = torch.stack(markers_list, dim=0)
 
     print("================Start Training Stage III Model: Compute the Prior!================")
@@ -179,7 +182,7 @@ def main():
     val_z_dataloader = DataLoader(val_z_data, sampler=val_z_sampler, batch_size=args.vae_batch_size)
     test_z_dataloader = DataLoader(test_z_data, sampler=test_z_sampler, batch_size=args.vae_batch_size)    
 
-    args.save_path = './cache/dygen_acc_{}_{}.npy'.format(args.noise_ratio, args.total_iter)
+    args.save_path = './log/dygen_acc_{}_{}.npy'.format(args.noise_ratio, args.total_iter)
     
 
     print("================Start Training Stage IV Model: Estimate Transition Matrix!================")
@@ -189,7 +192,7 @@ def main():
 
     accuracy_pre, accuracy = func.merge_classifier_and_autoencoder(test_z_dataloader, best_model, vae_model, args.vae_batch_size)
     print("The performance after denoising:", accuracy)
-    f = open('./cache/{}-results.logs'.format(args.dataset), 'a')
+    f = open('./log/{}-results.logs'.format(args.dataset), 'a')
     f.write('DyGen-'+args.noise_type+'-'+str(args.noise_ratio)+'-'+str(args.total_iter)+'-'+str(args.lambda_t)+'-'+str(args.warmup_epochs)+'-'+str(args.n_model)+'-'+str(args.epochs)+'-'+str(args.seed))
     f.write('\n')
     f.write("The orignal model performance is: "+str(accuracy_pre))
